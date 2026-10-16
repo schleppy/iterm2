@@ -16,9 +16,15 @@ Scope:
 * Parse `ITERM_SESSION_ID` to correlate processes (for example Claude Code)
   with sessions.
 
-Out of scope: screen contents, keystrokes, sending input, and creating,
-closing, or otherwise changing sessions. The client only issues
-`ListSessions`, `Focus`, `Variable` (get `path`), and `Notification`
+* Read a session's screen (`Client.Screen`: cells, styles including OSC 8
+  hyperlinks, cursor, grid size), its profile colors (`Client.ProfileColors`),
+  and be told when it changes (`Client.SubscribeScreen`, `EventScreenUpdated`).
+* Type into a session (`Client.SendText`).
+* Bring a window, tab, or session forward (`Client.Activate`).
+
+Out of scope: creating, closing, or otherwise changing sessions. The client
+issues `ListSessions`, `Focus`, `Variable` (get `path`, `columns`, `rows`),
+`Notification`, `GetBuffer`, `GetProfileProperty`, `SendText`, and `Activate`
 requests.
 
 Docs:
@@ -140,7 +146,16 @@ iTerm2's Script Console under `AppName`.
   sessions in layouts. Those then come only from focus data. The client was
   validated against iTerm2 3.7.4 (protocol 1.18). The schema is from protocol
   1.23.
-* Transactions, profiles, and other API areas are not implemented.
+* Screen contents and input are sensitive. Anything that can call
+  `Client.Screen` or `Client.SendText` can read what a user sees and type into
+  their shells, so consumers that expose them (for example over HTTP) must
+  gate access themselves. The library does no access control.
+* Use a separate `Client` for screen updates. `EventScreenUpdated` shares the
+  events channel with topology events; heavy screen traffic on a shared client
+  can overflow it and force `EventResync` refreshes. `Watcher` dials its own
+  client and never subscribes to screen updates.
+* Profile access is limited to colors (`ProfileColors`). Transactions and
+  other API areas are not implemented.
 
 ## Integration test against a real iTerm2
 

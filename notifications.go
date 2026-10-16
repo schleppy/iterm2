@@ -26,6 +26,9 @@ const (
 	// dropped because the Events channel was full, so the consumer should
 	// refresh its state. It cannot be subscribed to.
 	EventResync
+	// EventScreenUpdated is NOTIFY_ON_SCREEN_UPDATE: the screen of SessionID
+	// changed. Subscribe with Client.SubscribeScreen, not Subscribe.
+	EventScreenUpdated
 )
 
 // TopologyEvents are the event types needed to track windows, tabs, sessions,
@@ -46,6 +49,8 @@ func (t EventType) String() string {
 		return "focus-changed"
 	case EventResync:
 		return "resync"
+	case EventScreenUpdated:
+		return "screen-updated"
 	}
 	return fmt.Sprintf("EventType(%d)", int(t))
 }
@@ -69,7 +74,8 @@ func (t EventType) notificationType() (pb.NotificationType, bool) {
 type Event struct {
 	Type EventType
 
-	// SessionID is set for EventSessionCreated and EventSessionTerminated.
+	// SessionID is set for EventSessionCreated, EventSessionTerminated, and
+	// EventScreenUpdated.
 	SessionID string
 
 	// Focus is set for EventFocusChanged.
@@ -150,6 +156,8 @@ func eventFromNotification(n *pb.Notification) (Event, bool) {
 	case n.FocusChangedNotification != nil:
 		fc, ok := focusChangeFromProto(n.FocusChangedNotification)
 		return Event{Type: EventFocusChanged, Focus: fc}, ok
+	case n.ScreenUpdateNotification != nil:
+		return Event{Type: EventScreenUpdated, SessionID: n.ScreenUpdateNotification.GetSession()}, true
 	}
 	return Event{}, false
 }
