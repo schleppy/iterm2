@@ -17,15 +17,19 @@ Scope:
   with sessions.
 
 * Read a session's screen (`Client.Screen`: cells, styles including OSC 8
-  hyperlinks, cursor, grid size), its profile colors (`Client.ProfileColors`),
+  hyperlinks, cursor, grid size), its profile colors, with any separate light
+  and dark mode sets (`Client.ProfileColors`),
   and be told when it changes (`Client.SubscribeScreen`, `EventScreenUpdated`).
 * Type into a session (`Client.SendText`).
 * Bring a window, tab, or session forward (`Client.Activate`).
+* Split a session into two (`Client.SplitPane`) and open a tab in a window or
+  a new window, optionally in a given directory with text typed at start
+  (`Client.CreateTab`).
 
-Out of scope: creating, closing, or otherwise changing sessions. The client
+Out of scope: otherwise creating, closing, or changing sessions. The client
 issues `ListSessions`, `Focus`, `Variable` (get `path`, `columns`, `rows`),
-`Notification`, `GetBuffer`, `GetProfileProperty`, `SendText`, and `Activate`
-requests.
+`Notification`, `GetBuffer`, `GetProfileProperty`, `SendText`, `Activate`, `SplitPane`, and
+`CreateTab` requests.
 
 Docs:
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -259,22 +260,39 @@ type RGB struct{ R, G, B uint8 }
 
 // Palette is a session's profile colors. Missing entries are zero; Has says
 // which were set.
+//
+// A profile can keep separate colors for macOS's light and dark appearance
+// (iTerm2 3.5's "Use separate colors for light and dark mode"). Separate says
+// it does; Dark and Light then hold those sets (each nil when the profile has
+// none of its colors). The top-level colors are the profile's plain ones.
 type Palette struct {
 	Foreground, Background, Cursor, Bold, Selection RGB
 	ANSI                                            [16]RGB
 	Has                                             map[string]bool // "foreground", "background", "cursor", "bold", "selection", "ansi"
+
+	Separate    bool
+	Dark, Light *Palette
 }
 
+const separateKey = "Use Separate Colors for Light and Dark Mode"
+
 var paletteKeys = func() []string {
-	keys := []string{"Foreground Color", "Background Color", "Cursor Color", "Bold Color", "Selection Color"}
+	base := []string{"Foreground Color", "Background Color", "Cursor Color", "Bold Color", "Selection Color"}
 	for i := range 16 {
-		keys = append(keys, "Ansi "+strconv.Itoa(i)+" Color")
+		base = append(base, "Ansi "+strconv.Itoa(i)+" Color")
+	}
+	keys := []string{separateKey}
+	for _, suffix := range []string{"", " (Dark)", " (Light)"} {
+		for _, k := range base {
+			keys = append(keys, k+suffix)
+		}
 	}
 	return keys
 }()
 
-// ProfileColors reads the colors of session sessionID's profile. It returns
-// ErrBadIdentifier if iTerm2 has no such session.
+// ProfileColors reads the colors of session sessionID's profile, with its
+// light and dark mode sets when it has them. It returns ErrBadIdentifier if
+// iTerm2 has no such session.
 func (c *Client) ProfileColors(ctx context.Context, sessionID string) (*Palette, error) {
 	r, err := c.call(ctx, &pb.ClientOriginatedMessage{Submessage: &pb.ClientOriginatedMessage_GetProfilePropertyRequest{
 		GetProfilePropertyRequest: &pb.GetProfilePropertyRequest{Session: proto.String(sessionID), Keys: paletteKeys},
@@ -294,37 +312,58 @@ func (c *Client) ProfileColors(ctx context.Context, sessionID string) (*Palette,
 		return nil, fmt.Errorf("iterm2: get-profile-property failed: %s", st)
 	}
 	p := &Palette{Has: map[string]bool{}}
-	ansi := 0
+	dark, light := &Palette{Has: map[string]bool{}}, &Palette{Has: map[string]bool{}}
+	ansi := map[*Palette]int{}
 	for _, prop := range resp.GetProperties() {
+		k := prop.GetKey()
+		if k == separateKey {
+			var on bool
+			if json.Unmarshal([]byte(prop.GetJsonValue()), &on) == nil {
+				p.Separate = on
+			}
+			continue
+		}
 		col, ok := parseProfileColor(prop.GetJsonValue())
 		if !ok {
 			continue
 		}
-		switch k := prop.GetKey(); k {
+		to := p
+		if base, found := strings.CutSuffix(k, " (Dark)"); found {
+			to, k = dark, base
+		} else if base, found := strings.CutSuffix(k, " (Light)"); found {
+			to, k = light, base
+		}
+		switch k {
 		case "Foreground Color":
-			p.Foreground, p.Has["foreground"] = col, true
+			to.Foreground, to.Has["foreground"] = col, true
 		case "Background Color":
-			p.Background, p.Has["background"] = col, true
+			to.Background, to.Has["background"] = col, true
 		case "Cursor Color":
-			p.Cursor, p.Has["cursor"] = col, true
+			to.Cursor, to.Has["cursor"] = col, true
 		case "Bold Color":
-			p.Bold, p.Has["bold"] = col, true
+			to.Bold, to.Has["bold"] = col, true
 		case "Selection Color":
-			p.Selection, p.Has["selection"] = col, true
+			to.Selection, to.Has["selection"] = col, true
 		default:
 			var i int
 			if _, err := fmt.Sscanf(k, "Ansi %d Color", &i); err == nil && i >= 0 && i < 16 {
-				p.ANSI[i] = col
-				ansi++
+				to.ANSI[i] = col
+				ansi[to]++
 			}
 		}
 	}
-	p.Has["ansi"] = ansi == 16
+	for _, x := range []*Palette{p, dark, light} {
+		x.Has["ansi"] = ansi[x] == 16
+	}
+	if len(dark.Has) > 1 || dark.Has["ansi"] { // more than the "ansi" entry itself
+		p.Dark = dark
+	}
+	if len(light.Has) > 1 || light.Has["ansi"] {
+		p.Light = light
+	}
 	return p, nil
 }
 
-// parseProfileColor decodes iTerm2's color dictionary
-// ({"Red Component": 0.5, ...}, components 0-1).
 func parseProfileColor(js string) (RGB, bool) {
 	var v struct {
 		R *float64 `json:"Red Component"`
